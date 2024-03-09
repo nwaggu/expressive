@@ -1,0 +1,2 @@
+pygame==2.0.0.dev20
+waiting==1.4.1
