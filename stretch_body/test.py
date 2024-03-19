@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import sys 
 import numpy as np 
 from waiting import wait 
+import math
+from scipy.interpolate import interp1d
 #robot control
 import stretch_body.robot
 
@@ -31,8 +33,8 @@ RED = (255, 0, 0)
 
 # set initial parametrs for program
 seed = random.randint(0, 2**32)
-amplitude = 0.1
-frequency = 0.4
+amplitude = 0.12
+frequency = 0.3
 octaves = 1
 # number of integer values on screen
 # (implicit frequency)
@@ -58,6 +60,21 @@ class ExpControl():
         self.robot.startup()
         self.noise = PerlinNoise(seed, amplitude, frequency, octaves, interpolation)
         #h = stretch_body.head.Head()
+
+
+    def reset(self):
+        #self.robot.startup()
+        self.robot.lift.motor.enable_pos_pid()
+        self.robot.arm.motor.enable_pos_pid()
+        self.robot.arm.move_to(0.1)
+        self.robot.lift.move_to(0.8)
+        self.robot.push_command()
+        time.sleep(5)
+        #self.robot.end_of_arm.pose('joint_wrist_roll', 0)
+        self.robot.end_of_arm.move_to('wrist_yaw', math.pi/2)
+        self.robot.end_of_arm.move_to('wrist_roll', 0)
+        self.robot.end_of_arm.move_to('wrist_pitch', 0)
+        print(self.robot.end_of_arm.get_joint_configuration())
 
 
     def _speedPerlin(self,times, set, i):
@@ -96,6 +113,8 @@ class ExpControl():
             return True
         return False
 
+    
+
     def secondaryMotion(self, reference):
         #Define the waypoints
         x = np.linspace(0,50,500)
@@ -120,29 +139,135 @@ class ExpControl():
         #Turn off the velocity :)
         self.robot.lift.set_velocity(0)
     
+    def generateSine():
+        cycles = 2 # how many sine cycles
+        resolution = 25 # how many datapoints to generate
+
+        length = np.pi * 2 * cycles
+        my_wave = np.sin(np.arange(0, length, length / resolution))
+        return my_wave
+
+
+
+    def limping(self):
+        self.robot.lift.motor.enable_vel_traj()
+        top = 0.7
+        bottom = 0.5
+        fast = -0.15
+        slow = 0.05
+        bit = 0
+        flag =0
+        position = self.robot.lift.status['pos']
+        position_list = []
+
+        self.robot.base.translate_by(10)
+
+        conversion = interp1d([bottom, top],[math.pi/5,-math.pi/3])
+        self.robot.end_of_arm.move_to('wrist_pitch', 0)
+        time_start = time.time()
+
+        while time.time() <= time_start + 120:
+            if bit == 0 and not flag:
+                self.robot.lift.set_velocity(-0.15)
+                self.robot.push_command()
+                flag = 1
+             
+            elif bit ==1 and not flag:
+                self.robot.lift.set_velocity(0.05)
+                self.robot.push_command()
+                flag = 1
+
+            if flag:  
+                if bit == 1: 
+                    if self.position_in_tolerance(self.robot.lift.status['pos'], top):
+                        bit = 0
+                        flag = 0
+                else: 
+                    if self.position_in_tolerance(self.robot.lift.status['pos'], bottom):
+                        bit =1
+                        flag=0
+            position_list.append(self.robot.lift.status['pos'])
+            if time.time() >= time_start + 0.3:
+                pos = position_list.pop()
+                if pos > top:
+                    pos = top
+                if pos < bottom: 
+                    pos = bottom
+                
+                angle = conversion(pos)
+                print(angle)
+                self.robot.end_of_arm.move_to('wrist_pitch', angle)
+            time.sleep(1/80)    
+            #self.robot.lift.set_velocity(-0.04)
+        self.robot.lift.set_velocity(0)
     
 
     def simpleLowVelocity(self):
-        #self.robot.base.set_translate_velocity(0.4)
+        conversion = interp1d([1, 0],[0,-math.pi/4])
+        conversion2 = interp1d([0, 1],[0,math.pi/2])
+        self.robot.base.set_translate_velocity(0.1)
         #self.robot.base.translate_by(0.1)
         #self.robot.push_command()
-        #self.s
         #self.robot.lift.tra
         #times = [0.0, 1.0, 8.0]
-        positions = [self.robot.lift.status['pos'], self.robot.lift.status['pos']+0.03, 0.1]
-        velocities = [self.robot.lift.status['vel'], 0.0, 0.0]
+        #positions = [self.robot.lift.status['pos'], self.robot.lift.status['pos']+0.03, 0.1]
+        #velocities = [self.robot.lift.status['vel'], 0.0, 0.0]
         self.robot.lift.motor.enable_vel_traj()
         self.robot.lift.set_velocity(0.02)
         self.robot.push_command()
-        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.9), sleep_seconds=0.1)
         
-       
-        self.robot.lift.set_velocity(-0.15)
+        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.9), sleep_seconds=1/80)
+        self.robot.lift.set_velocity(-0.13)
         self.robot.push_command()
-        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.1), sleep_seconds=0.1)
+        pos = self.robot.lift.status['pos']
+        angle = conversion(pos)
+        self.robot.end_of_arm.move_to('wrist_pitch', angle)
+        angle2 = conversion2(pos)
+        self.robot.end_of_arm.move_to('wrist_yaw', angle2)
+
+        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.85), sleep_seconds=1/80)
+        self.robot.lift.set_velocity(-0.1)
+        self.robot.push_command()
+        pos = self.robot.lift.status['pos']
+        angle = conversion(pos)
+        self.robot.end_of_arm.move_to('wrist_pitch', angle)
+        angle2 = conversion2(pos)
+        self.robot.end_of_arm.move_to('wrist_yaw', angle2)
+
+        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.75), sleep_seconds=1/80)
+        self.robot.lift.set_velocity(-0.04)
+        self.robot.push_command()
+        pos = self.robot.lift.status['pos']
+        angle = conversion(pos)
+        self.robot.end_of_arm.move_to('wrist_pitch', angle)
+        angle2 = conversion2(pos)
+        self.robot.end_of_arm.move_to('wrist_yaw', angle2)
+
+        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.2), sleep_seconds=1/80)
+        self.robot.lift.set_velocity(-0.02)
+        self.robot.push_command()
+        pos = self.robot.lift.status['pos']
+        angle = conversion(pos)
+        self.robot.end_of_arm.move_to('wrist_pitch', angle)
+        angle2 = conversion2(pos)
+        self.robot.end_of_arm.move_to('wrist_yaw', angle2)
+
+        wait(lambda: self.position_in_tolerance(self.robot.lift.status['pos'], 0.11), sleep_seconds=1/80)
+        pos = self.robot.lift.status['pos']
+        angle = conversion(pos)
+        self.robot.end_of_arm.move_to('wrist_pitch', angle)
+        angle2 = conversion2(pos)
+        self.robot.end_of_arm.move_to('wrist_yaw', angle2)
+        self.robot.stop()
         
+    def moveForward(self, speed):
         
-        
+        self.robot.base.set_velocity(speed,0)
+        self.robot.push_command()
+        time.sleep(3)
+        self.robot.base.set_velocity(0,0)
+
+
 
         #Create the spline trajectory
         #for waypoint in zip(times, positions,velocities):
@@ -161,13 +286,16 @@ class ExpControl():
    
 
 
-    def __del__(self):
-        print("Destructor Called Program Ending")
-        self.robot.stop()
+    #def __del__(self):
+    #    print("Destructor Called Program Ending")
+        
 
 exp = ExpControl()
 
-exp.simpleLowVelocity()
+exp.reset()
+#exp.moveForward(0.5)
+#time.sleep(5)
+exp.secondaryMotion(0.7)
 
 
 #Create the spline trajectory
